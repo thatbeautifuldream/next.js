@@ -382,12 +382,14 @@ export default class DevServer extends Server {
             page: pageName,
             pageRuntime: staticInfo.runtime,
             onClient: () => {},
-            onServer: () => {},
+            onServer: () => {
+              routedPages.push(pageName)
+            },
             onEdgeServer: () => {
+              routedPages.push(pageName)
               edgeRoutesSet.add(pageName)
             },
           })
-          routedPages.push(pageName)
         }
 
         if (envChange) {

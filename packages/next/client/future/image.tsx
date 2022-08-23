@@ -358,13 +358,41 @@ const ImageElement = ({
         loading={loading}
         style={{ ...imgStyle, ...blurStyle }}
         ref={useCallback(
-          (img: ImgElementWithDataProp) => {
+          (img: ImgElementWithDataProp | null) => {
+            if (!img) {
+              return
+            }
+            if (onError) {
+              // If the image has an error before react hydrates, then the error is lost.
+              // The workaround is to wait until the image is mounted which is after hydration,
+              // then we set the src again to trigger the error handler (if there was an error).
+              // eslint-disable-next-line no-self-assign
+              img.src = img.src
+            }
             if (process.env.NODE_ENV !== 'production') {
-              if (img && !srcString) {
+              if (!srcString) {
                 console.error(`Image is missing required "src" property:`, img)
               }
+              if (
+                img.getAttribute('objectFit') ||
+                img.getAttribute('objectfit')
+              ) {
+                console.error(
+                  `Image has unknown prop "objectFit". Did you mean to use the "style" prop instead?`,
+                  img
+                )
+              }
+              if (
+                img.getAttribute('objectPosition') ||
+                img.getAttribute('objectposition')
+              ) {
+                console.error(
+                  `Image has unknown prop "objectPosition". Did you mean to use the "style" prop instead?`,
+                  img
+                )
+              }
             }
-            if (img?.complete) {
+            if (img.complete) {
               handleLoading(
                 img,
                 srcString,
@@ -374,7 +402,13 @@ const ImageElement = ({
               )
             }
           },
-          [srcString, placeholder, onLoadingCompleteRef, setBlurComplete]
+          [
+            srcString,
+            placeholder,
+            onLoadingCompleteRef,
+            setBlurComplete,
+            onError,
+          ]
         )}
         onLoad={(event) => {
           const img = event.currentTarget as ImgElementWithDataProp
@@ -427,6 +461,73 @@ const ImageElement = ({
       )}
     </>
   )
+}
+
+function defaultLoader({
+  config,
+  src,
+  width,
+  quality,
+}: ImageLoaderPropsWithConfig): string {
+  if (process.env.NODE_ENV !== 'production') {
+    const missingValues = []
+
+    // these should always be provided but make sure they are
+    if (!src) missingValues.push('src')
+    if (!width) missingValues.push('width')
+
+    if (missingValues.length > 0) {
+      throw new Error(
+        `Next Image Optimization requires ${missingValues.join(
+          ', '
+        )} to be provided. Make sure you pass them as props to the \`next/image\` component. Received: ${JSON.stringify(
+          { src, width, quality }
+        )}`
+      )
+    }
+
+    if (src.startsWith('//')) {
+      throw new Error(
+        `Failed to parse src "${src}" on \`next/image\`, protocol-relative URL (//) must be changed to an absolute URL (http:// or https://)`
+      )
+    }
+
+    if (
+      !src.startsWith('/') &&
+      (config.domains || experimentalRemotePatterns)
+    ) {
+      let parsedSrc: URL
+      try {
+        parsedSrc = new URL(src)
+      } catch (err) {
+        console.error(err)
+        throw new Error(
+          `Failed to parse src "${src}" on \`next/image\`, if using relative image it must start with a leading slash "/" or be an absolute URL (http:// or https://)`
+        )
+      }
+
+      if (process.env.NODE_ENV !== 'test') {
+        // We use dynamic require because this should only error in development
+        const { hasMatch } = require('../../shared/lib/match-remote-pattern')
+        if (!hasMatch(config.domains, experimentalRemotePatterns, parsedSrc)) {
+          throw new Error(
+            `Invalid src prop (${src}) on \`next/image\`, hostname "${parsedSrc.hostname}" is not configured under images in your \`next.config.js\`\n` +
+              `See more info: https://nextjs.org/docs/messages/next-image-unconfigured-host`
+          )
+        }
+      }
+    }
+  }
+
+  if (src.endsWith('.svg') && !config.dangerouslyAllowSVG) {
+    // Special case to make svg serve as-is to avoid proxying
+    // through the built-in Image Optimization API.
+    return src
+  }
+
+  return `${config.path}?url=${encodeURIComponent(src)}&w=${width}&q=${
+    quality || 75
+  }`
 }
 
 export default function Image({
@@ -583,17 +684,6 @@ export default function Image({
     if (priority && loading === 'lazy') {
       throw new Error(
         `Image with src "${src}" has both "priority" and "loading='lazy'" properties. Only one should be used.`
-      )
-    }
-
-    if ('objectFit' in rest) {
-      throw new Error(
-        `Image with src "${src}" has unknown prop "objectFit". This style should be specified using the "style" property.`
-      )
-    }
-    if ('objectPosition' in rest) {
-      throw new Error(
-        `Image with src "${src}" has unknown prop "objectPosition". This style should be specified using the "style" property.`
       )
     }
 
@@ -802,71 +892,4 @@ export default function Image({
       ) : null}
     </>
   )
-}
-
-function defaultLoader({
-  config,
-  src,
-  width,
-  quality,
-}: ImageLoaderPropsWithConfig): string {
-  if (process.env.NODE_ENV !== 'production') {
-    const missingValues = []
-
-    // these should always be provided but make sure they are
-    if (!src) missingValues.push('src')
-    if (!width) missingValues.push('width')
-
-    if (missingValues.length > 0) {
-      throw new Error(
-        `Next Image Optimization requires ${missingValues.join(
-          ', '
-        )} to be provided. Make sure you pass them as props to the \`next/image\` component. Received: ${JSON.stringify(
-          { src, width, quality }
-        )}`
-      )
-    }
-
-    if (src.startsWith('//')) {
-      throw new Error(
-        `Failed to parse src "${src}" on \`next/image\`, protocol-relative URL (//) must be changed to an absolute URL (http:// or https://)`
-      )
-    }
-
-    if (
-      !src.startsWith('/') &&
-      (config.domains || experimentalRemotePatterns)
-    ) {
-      let parsedSrc: URL
-      try {
-        parsedSrc = new URL(src)
-      } catch (err) {
-        console.error(err)
-        throw new Error(
-          `Failed to parse src "${src}" on \`next/image\`, if using relative image it must start with a leading slash "/" or be an absolute URL (http:// or https://)`
-        )
-      }
-
-      if (process.env.NODE_ENV !== 'test') {
-        // We use dynamic require because this should only error in development
-        const { hasMatch } = require('../../shared/lib/match-remote-pattern')
-        if (!hasMatch(config.domains, experimentalRemotePatterns, parsedSrc)) {
-          throw new Error(
-            `Invalid src prop (${src}) on \`next/image\`, hostname "${parsedSrc.hostname}" is not configured under images in your \`next.config.js\`\n` +
-              `See more info: https://nextjs.org/docs/messages/next-image-unconfigured-host`
-          )
-        }
-      }
-    }
-  }
-
-  if (src.endsWith('.svg') && !config.dangerouslyAllowSVG) {
-    // Special case to make svg serve as-is to avoid proxying
-    // through the built-in Image Optimization API.
-    return src
-  }
-
-  return `${config.path}?url=${encodeURIComponent(src)}&w=${width}&q=${
-    quality || 75
-  }`
 }
