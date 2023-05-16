@@ -26,7 +26,12 @@ const expectStatus = async (path) => {
       const parsedUrl = url.parse(redirectDest, true)
       expect(parsedUrl.hostname).toBe('localhost')
     } else {
-      expect(res.status === 400 || res.status === 404).toBe(true)
+      try {
+        expect(res.status === 400 || res.status === 404).toBe(true)
+      } catch (err) {
+        require('console').error({ path, status: res.status })
+        throw err
+      }
       expect(await res.text()).toMatch(containRegex)
     }
   }
@@ -66,6 +71,16 @@ const runTests = () => {
     const res = await fetchViaHTTP(appPort, '/vercel-icon-dark.avif')
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('image/avif')
+  })
+
+  it('should serve correct error code', async () => {
+    // vercel-icon-dark.avif is downloaded from https://vercel.com/design and transformed to avif on avif.io
+    const res = await fetchViaHTTP(appPort, '/vercel-icon-dark.avif', '', {
+      headers: {
+        Range: 'bytes=1000000000-',
+      },
+    })
+    expect(res.status).toBe(416) // 416 Range Not Satisfiable
   })
 
   // checks against traversal requests from
